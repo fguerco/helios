@@ -42,6 +42,10 @@ public class PollingDockerClient extends DefaultDockerClient {
     super(uri);
   }
 
+  public PollingDockerClient(Builder builder) {
+    super(builder);
+  }
+
   public PollingDockerClient(final URI uri, DockerCertificates dockerCertificates) {
     super(uri, dockerCertificates);
   }

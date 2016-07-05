@@ -26,9 +26,11 @@ import com.google.common.util.concurrent.AbstractIdleService;
 
 import com.codahale.metrics.MetricRegistry;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.spotify.docker.client.DefaultDockerClient;
 import com.spotify.docker.client.DockerCertificates;
 import com.spotify.docker.client.DockerClient;
 import com.spotify.docker.client.exceptions.DockerCertificateException;
+import com.spotify.docker.client.messages.AuthConfig;
 import com.spotify.helios.common.HeliosRuntimeException;
 import com.spotify.helios.common.SystemClock;
 import com.spotify.helios.common.descriptors.JobId;
@@ -235,7 +237,9 @@ public class AgentService extends AbstractIdleService implements Managed {
 
     final DockerClient dockerClient;
     if (isNullOrEmpty(config.getDockerHost().dockerCertPath())) {
-      dockerClient = new PollingDockerClient(config.getDockerHost().uri());
+      dockerClient = new PollingDockerClient(new DefaultDockerClient.Builder()
+              .uri(config.getDockerHost().uri())
+              .authConfig(AuthConfig.fromDockerConfig().build()));
     } else {
       final Path dockerCertPath = java.nio.file.Paths.get(config.getDockerHost().dockerCertPath());
       final DockerCertificates dockerCertificates;
