@@ -29,6 +29,7 @@ public class RolloutTask extends Descriptor {
     UNDEPLOY_OLD_JOBS,
     DEPLOY_NEW_JOB,
     AWAIT_RUNNING,
+    FORCE_UNDEPLOY_JOBS,
     AWAIT_STOPPED,
     MARK_UNDEPLOYED,
   }

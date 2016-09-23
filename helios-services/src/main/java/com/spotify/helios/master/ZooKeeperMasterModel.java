@@ -708,6 +708,8 @@ public class ZooKeeperMasterModel implements MasterModel {
         return rollingUpdateDeploy(client, opFactory, deploymentGroup, host);
       case AWAIT_RUNNING:
         return rollingUpdateAwaitRunning(client, opFactory, deploymentGroup, host);
+      case FORCE_UNDEPLOY_JOBS:
+        return forceRollingUpdateUndeploy(client, opFactory, deploymentGroup, host);
       case AWAIT_STOPPED:
         return rollingUpdateAwaitStopped(client, opFactory, deploymentGroup, host);
       case MARK_UNDEPLOYED:
@@ -782,7 +784,8 @@ public class ZooKeeperMasterModel implements MasterModel {
                                                      final TaskStatus taskStatus,
                                                      final TaskStatus.State desiredState) {
     final List<TaskStatus.State> previousJobStates = getPreviousJobStates(jobId, host, 10);
-    final String baseError = "timed out waiting for job to reach state " + desiredState + " ";
+    final String baseError = "timed out waiting for job " + jobId
+                             + " to reach state " + desiredState + " ";
     final String stateInfo = String.format(
             "(terminal job state %s, previous states: %s)",
             taskStatus.getState(),
@@ -1022,36 +1025,87 @@ public class ZooKeeperMasterModel implements MasterModel {
                                                 final RollingUpdateOpFactory opFactory,
                                                 final DeploymentGroup deploymentGroup,
                                                 final String host) {
+    return rollingUpdateUndeploy(client, opFactory, deploymentGroup, host, false);
+  }
+
+  private RollingUpdateOp forceRollingUpdateUndeploy(final ZooKeeperClient client,
+                                                     final RollingUpdateOpFactory opFactory,
+                                                     final DeploymentGroup deploymentGroup,
+                                                     final String host) {
+    return rollingUpdateUndeploy(client, opFactory, deploymentGroup, host, true);
+  }
+
+  private RollingUpdateOp rollingUpdateUndeploy(final ZooKeeperClient client,
+                                                final RollingUpdateOpFactory opFactory,
+                                                final DeploymentGroup deploymentGroup,
+                                                final String host,
+                                                final boolean force) {
     final List<ZooKeeperOperation> operations = Lists.newArrayList();
 
     for (final Deployment deployment : getTasks(client, host).values()) {
-      final boolean isOwnedByDeploymentGroup = Objects.equals(
-          deployment.getDeploymentGroupName(), deploymentGroup.getName());
-      final boolean isSameJob = deployment.getJobId().equals(deploymentGroup.getJobId());
-      final RolloutOptions rolloutOptions = deploymentGroup.getRolloutOptions();
 
-      if (isOwnedByDeploymentGroup || (
-          isSameJob && rolloutOptions.getMigrate())) {
-        if (isSameJob && isOwnedByDeploymentGroup && deployment.getGoal().equals(Goal.START)) {
-          // The job we want deployed is already deployed and set to run, so just leave it.
-          continue;
-        }
+      if (!ownedByDeploymentGroup(deployment, deploymentGroup)) {
+        continue;
+      }
 
-        try {
-          final String token = MoreObjects.firstNonNull(
-              deploymentGroup.getRolloutOptions().getToken(), Job.EMPTY_TOKEN);
-          operations.addAll(getUndeployOperations(client, host, deployment.getJobId(), token));
-        } catch (TokenVerificationException e) {
-          return opFactory.error(e, host, RollingUpdateError.TOKEN_VERIFICATION_ERROR);
-        } catch (HostNotFoundException e) {
-          return opFactory.error(e, host, RollingUpdateError.HOST_NOT_FOUND);
-        } catch (JobNotDeployedException e) {
-          // probably somebody beat us to the punch of undeploying. that's fine.
-        }
+      if (!force && redundantDeployment(deployment, deploymentGroup)) {
+        continue;
+      }
+
+      try {
+        final String token = MoreObjects.firstNonNull(
+            deploymentGroup.getRolloutOptions().getToken(), Job.EMPTY_TOKEN);
+        operations.addAll(getUndeployOperations(client, host, deployment.getJobId(), token));
+        log.debug("planned undeploy operations for job={}", deployment.getJobId());
+      } catch (TokenVerificationException e) {
+        return opFactory.error(e, host, RollingUpdateError.TOKEN_VERIFICATION_ERROR);
+      } catch (HostNotFoundException e) {
+        return opFactory.error(e, host, RollingUpdateError.HOST_NOT_FOUND);
+      } catch (JobNotDeployedException e) {
+        // probably somebody beat us to the punch of undeploying. that's fine.
       }
     }
 
     return opFactory.nextTask(operations);
+  }
+
+  private boolean ownedByDeploymentGroup(final Deployment deployment,
+                                         final DeploymentGroup deploymentGroup) {
+    // This deployment was created by this deployment group.
+    if (Objects.equals(deployment.getDeploymentGroupName(), deploymentGroup.getName())) {
+      return true;
+    }
+
+    // This deployment was not created by this deployment group, but should be migrated into it
+    // because a migration was requested and it is of the deployment group's job.
+    if (deploymentGroup.getRolloutOptions().getMigrate() &&
+        deployment.getJobId().equals(deploymentGroup.getJobId())) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private boolean redundantDeployment(final Deployment deployment,
+                                      final DeploymentGroup deploymentGroup) {
+    // This deployment was not created by this deployment group.
+    if (!Objects.equals(deployment.getDeploymentGroupName(), deploymentGroup.getName())) {
+      return false;
+    }
+
+    // This deployment is not of the deployment group's job.
+    if (!deployment.getJobId().equals(deploymentGroup.getJobId())) {
+      return false;
+    }
+
+    // This deployment aims to do something other than start.
+    if (!Goal.START.equals(deployment.getGoal())) {
+      return false;
+    }
+
+    // Undeploying this deployment's job would be redundant because the next operation would simply
+    // redeploy the same job.
+    return true;
   }
 
   @Override
