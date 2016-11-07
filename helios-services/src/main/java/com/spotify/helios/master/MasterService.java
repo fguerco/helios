@@ -17,20 +17,20 @@
 
 package com.spotify.helios.master;
 
-import com.google.common.base.Strings;
-import com.google.common.base.Throwables;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
-import com.google.common.io.Resources;
-import com.google.common.util.concurrent.AbstractIdleService;
+import static com.google.common.base.Charsets.UTF_8;
+import static com.google.common.base.Strings.isNullOrEmpty;
+import static com.spotify.helios.servicescommon.ServiceRegistrars.createServiceRegistrar;
+import static com.spotify.helios.servicescommon.ZooKeeperAclProviders.digest;
+import static com.spotify.helios.servicescommon.ZooKeeperAclProviders.heliosAclProvider;
 
-import com.codahale.metrics.MetricRegistry;
 import com.spotify.helios.common.HeliosRuntimeException;
 import com.spotify.helios.master.http.VersionResponseFilter;
 import com.spotify.helios.master.metrics.HealthCheckGauge;
 import com.spotify.helios.master.metrics.ReportingResourceMethodDispatchAdapter;
+import com.spotify.helios.master.reaper.DeadAgentReaper;
+import com.spotify.helios.master.reaper.ExpiredJobReaper;
+import com.spotify.helios.master.reaper.JobHistoryReaper;
+import com.spotify.helios.master.reaper.OldJobReaper;
 import com.spotify.helios.master.resources.DeploymentGroupResource;
 import com.spotify.helios.master.resources.HistoryResource;
 import com.spotify.helios.master.resources.HostsResource;
@@ -62,6 +62,24 @@ import com.spotify.helios.servicescommon.statistics.Metrics;
 import com.spotify.helios.servicescommon.statistics.MetricsImpl;
 import com.spotify.helios.servicescommon.statistics.NoopMetrics;
 
+import ch.qos.logback.access.jetty.RequestLogImpl;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.jvm.GarbageCollectorMetricSet;
+import com.codahale.metrics.jvm.MemoryUsageGaugeSet;
+import com.google.common.base.Strings;
+import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
+import com.google.common.io.Resources;
+import com.google.common.util.concurrent.AbstractIdleService;
+import io.dropwizard.configuration.ConfigurationException;
+import io.dropwizard.jetty.GzipFilterFactory;
+import io.dropwizard.jetty.RequestLogFactory;
+import io.dropwizard.logging.AppenderFactory;
+import io.dropwizard.server.DefaultServerFactory;
+import io.dropwizard.setup.Environment;
 import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.AuthInfo;
 import org.apache.curator.framework.CuratorFramework;
@@ -88,20 +106,6 @@ import java.util.concurrent.TimeUnit;
 import javax.servlet.DispatcherType;
 import javax.servlet.FilterRegistration;
 
-import ch.qos.logback.access.jetty.RequestLogImpl;
-import io.dropwizard.configuration.ConfigurationException;
-import io.dropwizard.jetty.GzipFilterFactory;
-import io.dropwizard.jetty.RequestLogFactory;
-import io.dropwizard.logging.AppenderFactory;
-import io.dropwizard.server.DefaultServerFactory;
-import io.dropwizard.setup.Environment;
-
-import static com.google.common.base.Charsets.UTF_8;
-import static com.google.common.base.Strings.isNullOrEmpty;
-import static com.spotify.helios.servicescommon.ServiceRegistrars.createServiceRegistrar;
-import static com.spotify.helios.servicescommon.ZooKeeperAclProviders.digest;
-import static com.spotify.helios.servicescommon.ZooKeeperAclProviders.heliosAclProvider;
-
 /**
  * The Helios master service.
  */
@@ -122,6 +126,7 @@ public class MasterService extends AbstractIdleService {
   private final Map<String, String> environmentVariables;
   private final Optional<DeadAgentReaper> agentReaper;
   private final Optional<OldJobReaper> oldJobReaper;
+  private final Optional<JobHistoryReaper> jobHistoryReaper;
 
   private ZooKeeperRegistrarService zkRegistrar;
 
@@ -147,6 +152,9 @@ public class MasterService extends AbstractIdleService {
 
     // Configure metrics
     final MetricRegistry metricsRegistry = environment.metrics();
+    metricsRegistry.registerAll(new GarbageCollectorMetricSet());
+    metricsRegistry.registerAll(new MemoryUsageGaugeSet());
+
     final RiemannSupport riemannSupport = new RiemannSupport(metricsRegistry,
         config.getRiemannHostPort(), config.getName(), "helios-master");
     final RiemannFacade riemannFacade = riemannSupport.getFacade();
@@ -244,6 +252,15 @@ public class MasterService extends AbstractIdleService {
       this.oldJobReaper = Optional.empty();
     }
 
+    // Set up job history reaper (removes histories whose corresponding job doesn't exist)
+    if (config.isJobHistoryReapingEnabled()) {
+      this.jobHistoryReaper = Optional.of(
+          new JobHistoryReaper(model, zkClientProvider.get("jobHistoryReaper")));
+    } else {
+      log.info("Reaping of orphaned jobs disabled");
+      this.jobHistoryReaper = Optional.empty();
+    }
+
     // Set up http server
     environment.servlets()
         .addFilter("VersionResponseFilter", new VersionResponseFilter(metrics.getMasterMetrics()))
@@ -325,6 +342,7 @@ public class MasterService extends AbstractIdleService {
 
     agentReaper.ifPresent(reaper -> reaper.startAsync().awaitRunning());
     oldJobReaper.ifPresent(reaper -> reaper.startAsync().awaitRunning());
+    jobHistoryReaper.ifPresent(reaper -> reaper.startAsync().awaitRunning());
 
     try {
       server.start();
@@ -348,6 +366,7 @@ public class MasterService extends AbstractIdleService {
 
     agentReaper.ifPresent(reaper -> reaper.stopAsync().awaitTerminated());
     oldJobReaper.ifPresent(reaper -> reaper.stopAsync().awaitTerminated());
+    jobHistoryReaper.ifPresent(reaper -> reaper.stopAsync().awaitTerminated());
 
     rollingUpdateService.stopAsync().awaitTerminated();
     expiredJobReaper.stopAsync().awaitTerminated();

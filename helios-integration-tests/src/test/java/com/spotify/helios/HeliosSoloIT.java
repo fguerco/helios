@@ -17,21 +17,6 @@
 
 package com.spotify.helios;
 
-import com.google.common.net.HostAndPort;
-
-import com.spotify.helios.testing.HeliosDeploymentResource;
-import com.spotify.helios.testing.HeliosSoloDeployment;
-import com.spotify.helios.testing.TemporaryJob;
-import com.spotify.helios.testing.TemporaryJobs;
-
-import org.apache.commons.io.IOUtils;
-import org.junit.ClassRule;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.ExpectedException;
-
-import java.net.Socket;
-
 import static com.spotify.helios.system.SystemTestBase.ALPINE;
 import static com.spotify.helios.system.SystemTestBase.NGINX;
 import static java.util.Arrays.asList;
@@ -39,10 +24,32 @@ import static java.util.concurrent.TimeUnit.MINUTES;
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.Assert.assertThat;
 
+import com.spotify.helios.testing.HeliosDeploymentResource;
+import com.spotify.helios.testing.HeliosSoloDeployment;
+import com.spotify.helios.testing.InMemoryLogStreamFollower;
+import com.spotify.helios.testing.TemporaryJob;
+import com.spotify.helios.testing.TemporaryJobs;
+
+import com.google.common.net.HostAndPort;
+
+import org.apache.commons.io.IOUtils;
+import org.awaitility.Awaitility;
+import org.junit.ClassRule;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.ExpectedException;
+
+import java.net.Socket;
+import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
+
 public class HeliosSoloIT {
 
   @Rule
   public final ExpectedException expected = ExpectedException.none();
+
+  private static final InMemoryLogStreamFollower logStreamProvider =
+      InMemoryLogStreamFollower.create();
 
   @ClassRule
   public static HeliosDeploymentResource solo = new HeliosDeploymentResource(
@@ -50,6 +57,7 @@ public class HeliosSoloIT {
           .heliosSoloImage(Utils.soloImage())
           .checkForNewImages(false)
           .removeHeliosSoloOnExit(false)
+          .logStreamProvider(logStreamProvider)
           .env("REGISTRAR_HOST_FORMAT", "_${service}._${protocol}.test.${domain}")
           .env("WHITELISTED_CAPS", "IPC_LOCK,SYSLOG")
           .build()
@@ -86,7 +94,7 @@ public class HeliosSoloIT {
   @Test
   public void testServiceDiscovery() throws Exception {
     // start a container that runs nginx and registers with SkyDNS
-    jobs.job()
+    final TemporaryJob nginx = jobs.job()
         .image(NGINX)
         .port("http", 80, ports.localPort("http"))
         .registration("nginx", "http", "http")
@@ -97,7 +105,7 @@ public class HeliosSoloIT {
         .image(ALPINE)
         .port("nc", 4711, ports.localPort("nc"))
         .command("sh", "-c",
-                 "apk-install bind-tools " +
+                 "apk add --update bind-tools " +
                  "&& export SRV=$(dig -t SRV +short _nginx._http.test.$SPOTIFY_DOMAIN) " +
                  "&& export HOST=$(echo $SRV | cut -d' ' -f4) " +
                  "&& export PORT=$(echo $SRV | cut -d' ' -f3) " +
@@ -109,10 +117,19 @@ public class HeliosSoloIT {
 
     // Connect to alpine container to get the curl response. If we get back the nginx welcome page
     // we know that helios properly registered the nginx service in SkyDNS.
-    try (final Socket s = new Socket(alpineAddress.getHostText(), alpineAddress.getPort())) {
-      final String result = IOUtils.toString(s.getInputStream()).trim();
-      assertThat(result, containsString("Welcome to nginx!"));
-    }
+    final Callable<String> socketResponse = () -> {
+      try (final Socket s = new Socket(alpineAddress.getHostText(), alpineAddress.getPort())) {
+        return IOUtils.toString(s.getInputStream()).trim();
+      }
+    };
+    // allow a few retries for a delay in the apk install of bind-tools
+    Awaitility.await("alpine container returns nginx welcome")
+        .atMost(10, TimeUnit.SECONDS)
+        .until(socketResponse, containsString("Welcome to nginx!"));
+
+    // also throw in a check to make sure log streaming is working
+    assertThat(new String(logStreamProvider.getStderr(nginx.job().getId())),
+               containsString("nginx"));
   }
 
   @Test

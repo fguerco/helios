@@ -17,15 +17,17 @@
 
 package com.spotify.helios.cli.command;
 
-import com.google.common.base.Function;
-import com.google.common.base.Joiner;
-import com.google.common.base.Optional;
-import com.google.common.collect.Collections2;
-import com.google.common.collect.FluentIterable;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
+import static com.google.common.base.Strings.isNullOrEmpty;
+import static com.google.common.collect.Ordering.natural;
+import static com.spotify.helios.cli.Output.formatHostname;
+import static com.spotify.helios.cli.Output.humanDuration;
+import static com.spotify.helios.cli.Output.table;
+import static com.spotify.helios.cli.Utils.allAsMap;
+import static com.spotify.helios.common.descriptors.HostStatus.Status.UP;
+import static java.lang.String.format;
+import static java.lang.System.currentTimeMillis;
+import static net.sourceforge.argparse4j.impl.Arguments.append;
+import static net.sourceforge.argparse4j.impl.Arguments.storeTrue;
 
 import com.spotify.helios.cli.Table;
 import com.spotify.helios.client.HeliosClient;
@@ -36,6 +38,15 @@ import com.spotify.helios.common.descriptors.HostStatus;
 import com.spotify.helios.common.descriptors.JobId;
 import com.spotify.helios.common.descriptors.TaskStatus;
 
+import com.google.common.base.Function;
+import com.google.common.base.Joiner;
+import com.google.common.base.Optional;
+import com.google.common.collect.Collections2;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 import net.sourceforge.argparse4j.inf.Argument;
 import net.sourceforge.argparse4j.inf.Namespace;
 import net.sourceforge.argparse4j.inf.Subparser;
@@ -51,27 +62,13 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 
-import static com.google.common.base.Predicates.containsPattern;
-import static com.google.common.base.Strings.isNullOrEmpty;
-import static com.google.common.collect.Ordering.natural;
-import static com.spotify.helios.cli.Output.formatHostname;
-import static com.spotify.helios.cli.Output.humanDuration;
-import static com.spotify.helios.cli.Output.table;
-import static com.spotify.helios.cli.Utils.allAsMap;
-import static com.spotify.helios.cli.Utils.argToStringMap;
-import static com.spotify.helios.common.descriptors.HostStatus.Status.UP;
-import static java.lang.String.format;
-import static java.lang.System.currentTimeMillis;
-import static net.sourceforge.argparse4j.impl.Arguments.append;
-import static net.sourceforge.argparse4j.impl.Arguments.storeTrue;
-
 public class HostListCommand extends ControlCommand {
 
   private final Argument quietArg;
   private final Argument patternArg;
   private final Argument fullArg;
   private final Argument statusArg;
-  private final Argument labelsArg;
+  private final Argument hostSelectorsArg;
 
   private final String statusChoicesString;
 
@@ -108,23 +105,36 @@ public class HostListCommand extends ControlCommand {
         .choices(statusChoices.toArray(new String[statusChoices.size()]))
         .help("Filter hosts by its status. Valid statuses are: " + statusChoicesString);
 
-    labelsArg = parser.addArgument("-l", "--labels")
+    hostSelectorsArg = parser.addArgument("-s", "--selector")
         .action(append())
         .setDefault(new ArrayList<String>())
-        .nargs("+")
-        .help("Only include hosts that match all of these labels. Labels need to be in the format "
-              + "key=value.");
+        .help("Host selector expression. The list of hosts will be filtered to match only those "
+              + "whose labels match all of the supplied expressions. "
+              + "Multiple selector expressions can be specified with multiple `-s` arguments "
+              + "(e.g. `-s site=foo -s bar!=yes`). "
+              + "Supported operators are '=', '!=', 'in' and 'notin'.");
   }
 
   @Override
   int run(final Namespace options, final HeliosClient client, final PrintStream out,
           final boolean json, final BufferedReader stdin)
       throws ExecutionException, InterruptedException {
+
     final String pattern = options.getString(patternArg.getDest());
-    final List<String> hosts = FluentIterable
-        .from(client.listHosts().get())
-        .filter(containsPattern(pattern))
-        .toList();
+    final List<String> selectorArgValue = options.getList(hostSelectorsArg.getDest());
+    final Set<String> selectors = ImmutableSet.copyOf(selectorArgValue);
+
+    final List<String> hosts;
+
+    if (pattern.isEmpty() && selectors.isEmpty()) {
+      hosts = client.listHosts().get();
+    } else if (!pattern.isEmpty() && selectors.isEmpty()) {
+      hosts = client.listHosts(pattern).get();
+    } else if (pattern.isEmpty() && !selectors.isEmpty()) {
+      hosts = client.listHosts(selectors).get();
+    } else {
+      hosts = client.listHosts(pattern, selectors).get();
+    }
 
     final Map<String, String> queryParams = Maps.newHashMap();
     final String statusFilter = options.getString(statusArg.getDest());
@@ -151,19 +161,6 @@ public class HostListCommand extends ControlCommand {
     }
 
     final List<String> sortedHosts = natural().sortedCopy(hosts);
-
-    final Map<String, String> selectedLabels;
-    try {
-      selectedLabels = argToStringMap(options, labelsArg);
-    } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException(e.getMessage() +
-                                         "\nLabels need to be in the format key=value.");
-    }
-
-    if (selectedLabels != null && !selectedLabels.isEmpty() && json) {
-      System.err.println("Warning: filtering by label is not supported for JSON output. Not doing"
-                         + " any filtering by label.");
-    }
 
     if (quiet) {
       if (json) {
@@ -202,30 +199,6 @@ public class HostListCommand extends ControlCommand {
           final HostStatus s = e.getValue().get();
 
           if (s == null) {
-            continue;
-          }
-
-          boolean skipHost = false;
-          if (selectedLabels != null && !selectedLabels.isEmpty()) {
-            final Map<String, String> hostLabels = s.getLabels();
-            for (final Entry<String, String> label : selectedLabels.entrySet()) {
-              final String key = label.getKey();
-              final String value = label.getValue();
-
-              if (!hostLabels.containsKey(key)) {
-                skipHost = true;
-                break;
-              }
-
-              final String hostValue = hostLabels.get(key);
-
-              if (isNullOrEmpty(value) ? !isNullOrEmpty(hostValue) : !value.equals(hostValue)) {
-                skipHost = true;
-                break;
-              }
-            }
-          }
-          if (skipHost) {
             continue;
           }
 
@@ -279,11 +252,11 @@ public class HostListCommand extends ControlCommand {
             }
           }
 
-          final String labels = Joiner.on(", ").withKeyValueSeparator("=").join(s.getLabels());
+          final String hostLabels = Joiner.on(", ").withKeyValueSeparator("=").join(s.getLabels());
 
           table.row(formatHostname(full, host), status, s.getJobs().size(),
               runningDeployedJobs.size(), cpus, mem, loadAvg, memUsage, os, version, docker,
-              labels);
+              hostLabels);
         }
 
         table.print();

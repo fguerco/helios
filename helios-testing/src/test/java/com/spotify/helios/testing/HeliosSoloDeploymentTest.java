@@ -17,9 +17,25 @@
 
 package com.spotify.helios.testing;
 
+import static org.hamcrest.Matchers.hasItem;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
+import static org.mockito.Matchers.anyString;
+import static org.mockito.Matchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 import com.spotify.docker.client.DockerClient;
 import com.spotify.docker.client.DockerHost;
+import com.spotify.docker.client.LogStream;
 import com.spotify.docker.client.exceptions.ImageNotFoundException;
 import com.spotify.docker.client.messages.ContainerConfig;
 import com.spotify.docker.client.messages.ContainerCreation;
@@ -38,32 +54,18 @@ import com.spotify.helios.common.descriptors.Job;
 import com.spotify.helios.common.descriptors.JobId;
 import com.spotify.helios.common.descriptors.TaskStatus;
 import com.spotify.helios.common.protocol.JobUndeployResponse;
-
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigFactory;
 import com.typesafe.config.ConfigValueFactory;
-
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Matchers;
-
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-
-import static org.hamcrest.Matchers.hasItem;
-import static org.junit.Assert.assertThat;
-import static org.junit.Assert.assertTrue;
-import static org.mockito.Matchers.anyString;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
 
 public class HeliosSoloDeploymentTest {
 
@@ -88,6 +90,7 @@ public class HeliosSoloDeploymentTest {
       .setJob(JOB1)
       .setGoal(Goal.START)
       .setState(TaskStatus.State.RUNNING)
+      .setContainerId(CONTAINER_ID)
       .build();
   private static final TaskStatus TASK_STATUS2 = TaskStatus.newBuilder()
       .setJob(JOB2)
@@ -201,7 +204,9 @@ public class HeliosSoloDeploymentTest {
         .withValue("helios.solo.profiles.test.namespace", ConfigValueFactory.fromAnyRef(ns))
         .withValue("helios.solo.profiles.test.env.TEST", ConfigValueFactory.fromAnyRef(env));
 
-    buildHeliosSoloDeployment(new HeliosSoloDeployment.Builder(null, config));
+    final HeliosSoloDeployment deployment = buildHeliosSoloDeployment(
+        new HeliosSoloDeployment.Builder(null, config));
+    assertEquals(ns + ".solo.local", deployment.agentName());
 
     boolean foundSolo = false;
     for (final ContainerConfig cc : containerConfig.getAllValues()) {
@@ -270,16 +275,35 @@ public class HeliosSoloDeploymentTest {
             .setJobs(ImmutableMap.of(JOB_ID2, Deployment.of(JOB_ID2, Goal.START)))
             .build());
     //noinspection unchecked
-    when(heliosClient.hostStatus(HOST1)).thenReturn(statusFuture11, statusFuture12);
+    when(heliosClient.hostStatus(HOST1)).thenReturn(statusFuture11);
     //noinspection unchecked
-    when(heliosClient.hostStatus(HOST2)).thenReturn(statusFuture21, statusFuture22);
+    when(heliosClient.hostStatus(HOST2)).thenReturn(statusFuture21);
 
     final ListenableFuture<JobUndeployResponse> undeployFuture1 = Futures.immediateFuture(
         new JobUndeployResponse(JobUndeployResponse.Status.OK, HOST1, JOB_ID1));
     final ListenableFuture<JobUndeployResponse> undeployFuture2 = Futures.immediateFuture(
         new JobUndeployResponse(JobUndeployResponse.Status.OK, HOST2, JOB_ID2));
-    when(heliosClient.undeploy(JOB_ID1, HOST1)).thenReturn(undeployFuture1);
-    when(heliosClient.undeploy(JOB_ID2, HOST2)).thenReturn(undeployFuture2);
+
+    // when undeploy is called, respond correctly & patch the mock to return
+    // the undeployed HostStatus
+    when(heliosClient.undeploy(JOB_ID1, HOST1)).thenAnswer(
+        new Answer<ListenableFuture<JobUndeployResponse>>() {
+          @Override
+          public ListenableFuture<JobUndeployResponse> answer(final InvocationOnMock invocation)
+              throws Throwable {
+            when(heliosClient.hostStatus(HOST1)).thenReturn(statusFuture12);
+            return undeployFuture1;
+          }
+        });
+    when(heliosClient.undeploy(JOB_ID2, HOST2)).thenAnswer(
+        new Answer<ListenableFuture<JobUndeployResponse>>() {
+          @Override
+          public ListenableFuture<JobUndeployResponse> answer(final InvocationOnMock invocation)
+              throws Throwable {
+            when(heliosClient.hostStatus(HOST1)).thenReturn(statusFuture22);
+            return undeployFuture2;
+          }
+        });
 
     solo.undeployLeftoverJobs();
 
@@ -299,5 +323,32 @@ public class HeliosSoloDeploymentTest {
 
     // There should be no more calls to any HeliosClient methods.
     verify(heliosClient, never()).jobStatus(Matchers.any(JobId.class));
+  }
+
+  @Test
+  public void testLogService() throws Exception {
+    final InMemoryLogStreamFollower logStreamProvider = InMemoryLogStreamFollower.create();
+    final HeliosSoloLogService logService = new HeliosSoloLogService(heliosClient,
+                                                                     dockerClient,
+                                                                     logStreamProvider);
+
+    final ListenableFuture<List<String>> hostsFuture = Futures.<List<String>>immediateFuture(
+        ImmutableList.of(HOST1));
+    when(heliosClient.listHosts()).thenReturn(hostsFuture);
+
+    final ListenableFuture<HostStatus> statusFuture = Futures.immediateFuture(
+        HostStatus.newBuilder()
+            .setStatus(Status.UP)
+            .setStatuses(ImmutableMap.of(JOB_ID1, TASK_STATUS1))
+            .setJobs(ImmutableMap.of(JOB_ID1, Deployment.of(JOB_ID1, Goal.START)))
+            .build());
+    when(heliosClient.hostStatus(HOST1)).thenReturn(statusFuture);
+
+    when(dockerClient.logs(anyString(), Matchers.<DockerClient.LogsParam>anyVararg()))
+        .thenReturn(mock(LogStream.class));
+    logService.runOneIteration();
+
+    verify(dockerClient, timeout(5000)).logs(eq(CONTAINER_ID),
+                                             Matchers.<DockerClient.LogsParam>anyVararg());
   }
 }

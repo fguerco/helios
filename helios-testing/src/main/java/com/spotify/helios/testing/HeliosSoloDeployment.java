@@ -17,6 +17,10 @@
 
 package com.spotify.helios.testing;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Strings.isNullOrEmpty;
+import static java.util.Collections.singletonList;
+
 import com.spotify.docker.client.DefaultDockerClient;
 import com.spotify.docker.client.DockerClient;
 import com.spotify.docker.client.DockerHost;
@@ -50,11 +54,12 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigValue;
-
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -64,10 +69,6 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-
-import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.base.Strings.isNullOrEmpty;
-import static java.util.Collections.singletonList;
 
 /**
  * A HeliosSoloDeployment represents a deployment of Helios Solo, which is to say one Helios
@@ -79,7 +80,7 @@ public class HeliosSoloDeployment implements HeliosDeployment {
   private static final Logger log = LoggerFactory.getLogger(HeliosSoloDeployment.class);
 
   public static final String BOOT2DOCKER_SIGNATURE = "Boot2Docker";
-  public static final String PROBE_IMAGE = "onescience/alpine:latest";
+  public static final String PROBE_IMAGE = "spotify/alpine:latest";
   public static final String HELIOS_NAME_SUFFIX = ".solo.local"; //  Required for SkyDNS discovery.
   public static final String HELIOS_ID_SUFFIX = "-solo-host";
   public static final String HELIOS_CONTAINER_PREFIX = "helios-solo-container-";
@@ -96,6 +97,7 @@ public class HeliosSoloDeployment implements HeliosDeployment {
   private final String heliosSoloImage;
   private final boolean pullBeforeCreate;
   private final String namespace;
+  private final String agentName;
   private final List<String> env;
   private final List<String> binds;
   private final String heliosContainerId;
@@ -103,6 +105,8 @@ public class HeliosSoloDeployment implements HeliosDeployment {
   private final HeliosClient heliosClient;
   private boolean removeHeliosSoloContainerOnExit;
   private final int jobUndeployWaitSeconds;
+
+  private HeliosSoloLogService logService;
 
   HeliosSoloDeployment(final Builder builder) {
     this.heliosSoloImage = builder.heliosSoloImage;
@@ -126,6 +130,7 @@ public class HeliosSoloDeployment implements HeliosDeployment {
         .or(containerDockerHost(dockerInfo));
 
     this.namespace = Optional.fromNullable(builder.namespace).or(randomString());
+    this.agentName = this.namespace + HELIOS_NAME_SUFFIX;
     this.env = containerEnv(builder.env);
     this.binds = containerBinds();
 
@@ -145,6 +150,11 @@ public class HeliosSoloDeployment implements HeliosDeployment {
             .setUser(username)
             .setEndpoints("http://" + deploymentAddress)
             .build());
+
+    if (builder.logStreamFollower != null) {
+      logService = new HeliosSoloLogService(heliosClient, dockerClient, builder.logStreamFollower);
+      logService.startAsync().awaitRunning();
+    }
   }
 
   /**
@@ -159,13 +169,21 @@ public class HeliosSoloDeployment implements HeliosDeployment {
   private String determineHeliosHost(final Info dockerInfo) throws HeliosDeploymentException {
     // note that checkDockerAndGetGateway is intentionally always called even if the return value
     // is discarded, as it does important checks about the local docker installation
+    log.info("checking that docker can be reached from within a container");
     final String probeContainerGateway = checkDockerAndGetGateway();
 
-    // conditions where the gateway IP address given to a container should be used
-    if (dockerHostAddressIsLocalhost() && !isDockerForMac(dockerInfo)) {
-      log.info("checking that docker can be reached from within a container");
+    if (dockerHostAddressIsLocalhost()) {
+      if (isDockerForMac(dockerInfo)) {
+        try {
+          return InetAddress.getLocalHost().getHostAddress();
+        } catch (UnknownHostException e) {
+          throw new HeliosDeploymentException("Cannot resolve local hostname", e);
+        }
+      }
+
       return probeContainerGateway;
     }
+
     // otherwise return the address of the docker host
     return dockerHost.address();
   }
@@ -197,6 +215,10 @@ public class HeliosSoloDeployment implements HeliosDeployment {
   @Override
   public HostAndPort address() {
       return deploymentAddress;
+  }
+
+  public String agentName() {
+    return agentName;
   }
 
   private boolean isBoot2Docker(final Info dockerInfo) {
@@ -300,9 +322,13 @@ public class HeliosSoloDeployment implements HeliosDeployment {
     final List<String> cmd = new ArrayList<>(ImmutableList.of("curl", "-f"));
     switch (containerDockerHost.uri().getScheme()) {
       case "unix":
+        // A note on the URLs used below: since 7.50, curl requires a hostname when
+        // using unix-sockets. See https://github.com/curl/curl/issues/936 and
+        // https://github.com/docker/docker/pull/27640. The hostname we use does not matter since
+        // curl is establishing a connection to the unix socket anyway.
         cmd.addAll(ImmutableList.of(
                 "--unix-socket", containerDockerHost.uri().getSchemeSpecificPart(),
-                "http:/containers/" + probeName + "/json"));
+                "http://docker/containers/" + probeName + "/json"));
         break;
       case "https":
         cmd.addAll(ImmutableList.of(
@@ -328,7 +354,7 @@ public class HeliosSoloDeployment implements HeliosDeployment {
     //TODO(negz): Don't make this.env immutable so early?
     final List<String> env = new ArrayList<>();
     env.addAll(this.env);
-    env.add("HELIOS_NAME=" + this.namespace + HELIOS_NAME_SUFFIX);
+    env.add("HELIOS_NAME=" + agentName);
     env.add("HELIOS_ID=" + this.namespace + HELIOS_ID_SUFFIX);
     env.add("HOST_ADDRESS=" + heliosHost);
 
@@ -454,6 +480,10 @@ public class HeliosSoloDeployment implements HeliosDeployment {
                containerDockerHost, heliosContainerId);
     }
 
+    if (logService != null) {
+      logService.stopAsync();
+    }
+
     this.dockerClient.close();
   }
 
@@ -503,7 +533,8 @@ public class HeliosSoloDeployment implements HeliosDeployment {
   private Boolean awaitJobUndeployed(final HeliosClient client, final String host,
                                      final JobId jobId, final int timeout,
                                      final TimeUnit timeunit) throws Exception {
-    return Polling.await(timeout, timeunit, new Callable<Boolean>() {
+    return Polling.await(timeout, timeunit, "Job " + jobId + " did not undeploy after %d %s",
+        new Callable<Boolean>() {
       @Override
       public Boolean call() throws Exception {
         final HostStatus hostStatus = getOrNull(client.hostStatus(host));
@@ -591,6 +622,9 @@ public class HeliosSoloDeployment implements HeliosDeployment {
     private boolean pullBeforeCreate = true;
     private boolean removeHeliosSoloContainerOnExit = false;
     private int jobUndeployWaitSeconds = DEFAULT_WAIT_SECONDS;
+    // Intentionally picking a publicly accessible class for this log output
+    private LogStreamFollower logStreamFollower =
+        LoggingLogStreamFollower.create(LoggerFactory.getLogger(TemporaryJob.class));
 
     Builder(String profile, Config rootConfig) {
       this.env = new HashSet<>();
@@ -733,6 +767,19 @@ public class HeliosSoloDeployment implements HeliosDeployment {
      */
     public Builder heliosUsername(final String username) {
       this.heliosUsername = username;
+      return this;
+    }
+
+    /**
+     * Optionally provide a custom {@link LogStreamFollower} that provides streams for writing
+     * container stdout/stderr logs. If set to null, logging of container stdout/stderr will be
+     * disabled.
+     *
+     * @param logStreamFollower The provider to use.
+     * @return This Builder, with its log stream provider configured.
+     */
+    public Builder logStreamProvider(final LogStreamFollower logStreamFollower) {
+      this.logStreamFollower = logStreamFollower;
       return this;
     }
 

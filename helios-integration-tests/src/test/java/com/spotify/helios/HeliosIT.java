@@ -17,7 +17,10 @@
 
 package com.spotify.helios;
 
-import com.google.common.collect.ImmutableList;
+import static com.spotify.helios.Utils.agentImage;
+import static com.spotify.helios.Utils.masterImage;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
 
 import com.spotify.helios.Utils.AgentStatusProber;
 import com.spotify.helios.common.protocol.CreateJobResponse;
@@ -30,15 +33,12 @@ import com.spotify.helios.testing.TemporaryJob;
 import com.spotify.helios.testing.TemporaryJobBuilder;
 import com.spotify.helios.testing.TemporaryJobs;
 
+import com.google.common.collect.ImmutableList;
+
 import org.junit.Before;
 import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
-
-import static com.spotify.helios.Utils.agentImage;
-import static com.spotify.helios.Utils.masterImage;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.equalTo;
 
 public class HeliosIT {
 
@@ -48,6 +48,7 @@ public class HeliosIT {
           .heliosSoloImage(Utils.soloImage())
           .checkForNewImages(false)
           .removeHeliosSoloOnExit(false)
+          .logStreamProvider(null)
           .env("REGISTRAR_HOST_FORMAT", "_${service}._${protocol}.test.${domain}")
           .build()
   );
@@ -66,7 +67,7 @@ public class HeliosIT {
   public void setup() throws Exception {
     // zookeeper
     final TemporaryJob zk = temporaryJobs.job()
-        .image("jplock/zookeeper:3.4.5")
+        .image("spotify/zookeeper:3.4.5")
         .port("zk", 2181)
         .deploy();
 
@@ -111,7 +112,7 @@ public class HeliosIT {
   @Test
   public void test() throws Exception {
     final CreateJobResponse create = cli(CreateJobResponse.class, "create", "test:1",
-                                         "busybox:latest");
+                                         "spotify/busybox:latest");
     assertThat(create.getStatus(), equalTo(CreateJobResponse.Status.OK));
 
     final JobDeployResponse deploy = cli(JobDeployResponse.class, "deploy", "test:1", TEST_HOST);

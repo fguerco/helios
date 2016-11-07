@@ -17,21 +17,33 @@
 
 package com.spotify.helios.system;
 
-import com.google.common.base.Charsets;
-import com.google.common.base.Strings;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Range;
-import com.google.common.io.Files;
-import com.google.common.util.concurrent.FutureFallback;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.Service;
+import static com.google.common.base.CharMatcher.WHITESPACE;
+import static com.google.common.base.Charsets.UTF_8;
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Strings.isNullOrEmpty;
+import static com.google.common.collect.Iterables.concat;
+import static com.google.common.collect.Lists.newArrayList;
+import static com.spotify.helios.cli.command.JobCreateCommand.DEFAULT_METADATA_ENVVARS;
+import static com.spotify.helios.common.descriptors.DeploymentGroupStatus.State.FAILED;
+import static com.spotify.helios.common.descriptors.Job.EMPTY_ENV;
+import static com.spotify.helios.common.descriptors.Job.EMPTY_EXPIRES;
+import static com.spotify.helios.common.descriptors.Job.EMPTY_GRACE_PERIOD;
+import static com.spotify.helios.common.descriptors.Job.EMPTY_HOSTNAME;
+import static com.spotify.helios.common.descriptors.Job.EMPTY_PORTS;
+import static com.spotify.helios.common.descriptors.Job.EMPTY_REGISTRATION;
+import static com.spotify.helios.common.descriptors.Job.EMPTY_VOLUMES;
+import static java.lang.Integer.toHexString;
+import static java.util.Arrays.asList;
+import static java.util.Collections.singletonList;
+import static java.util.concurrent.TimeUnit.MINUTES;
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.is;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.spotify.docker.client.DefaultDockerClient;
 import com.spotify.docker.client.DockerCertificates;
 import com.spotify.docker.client.DockerClient;
@@ -74,8 +86,22 @@ import com.spotify.helios.master.MasterMain;
 import com.spotify.helios.servicescommon.ZooKeeperAclProviders;
 import com.spotify.helios.servicescommon.coordination.CuratorClientFactory;
 import com.spotify.helios.servicescommon.coordination.Paths;
-import com.sun.jersey.api.client.ClientResponse;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.google.common.base.Charsets;
+import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.google.common.collect.Range;
+import com.google.common.io.Files;
+import com.google.common.util.concurrent.FutureFallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.Service;
+import com.sun.jersey.api.client.ClientResponse;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.http.HttpStatus;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -114,31 +140,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import static com.google.common.base.CharMatcher.WHITESPACE;
-import static com.google.common.base.Charsets.UTF_8;
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Strings.isNullOrEmpty;
-import static com.google.common.collect.Iterables.concat;
-import static com.google.common.collect.Lists.newArrayList;
-import static com.spotify.helios.cli.command.JobCreateCommand.DEFAULT_METADATA_ENVVARS;
-import static com.spotify.helios.common.descriptors.Job.EMPTY_ENV;
-import static com.spotify.helios.common.descriptors.Job.EMPTY_EXPIRES;
-import static com.spotify.helios.common.descriptors.Job.EMPTY_GRACE_PERIOD;
-import static com.spotify.helios.common.descriptors.Job.EMPTY_HOSTNAME;
-import static com.spotify.helios.common.descriptors.Job.EMPTY_PORTS;
-import static com.spotify.helios.common.descriptors.Job.EMPTY_REGISTRATION;
-import static com.spotify.helios.common.descriptors.Job.EMPTY_VOLUMES;
-import static java.lang.Integer.toHexString;
-import static java.util.Arrays.asList;
-import static java.util.Collections.singletonList;
-import static java.util.concurrent.TimeUnit.MINUTES;
-import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsString;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
 public abstract class SystemTestBase {
 
   private static final Logger log = LoggerFactory.getLogger(SystemTestBase.class);
@@ -146,13 +147,13 @@ public abstract class SystemTestBase {
   public static final int WAIT_TIMEOUT_SECONDS = 40;
   public static final int LONG_WAIT_SECONDS = 400;
 
-  public static final String BUSYBOX = "busybox:latest";
+  public static final String BUSYBOX = "spotify/busybox:latest";
   public static final String BUSYBOX_WITH_DIGEST =
       "busybox@sha256:16a2a52884c2a9481ed267c2d46483eac7693b813a63132368ab098a71303f8a";
-  public static final String NGINX = "rohan/nginx-alpine:latest";
-  public static final String UHTTPD = "fnichol/docker-uhttpd:latest";
-  public static final String ALPINE = "onescience/alpine:latest";
-  public static final String MEMCACHED = "rohan/memcached-mini:latest";
+  public static final String NGINX = "spotify/nginx-alpine:latest";
+  public static final String UHTTPD = "spotify/docker-uhttpd:latest";
+  public static final String ALPINE = "spotify/alpine:latest";
+  public static final String MEMCACHED = "spotify/memcached-mini:latest";
   public static final List<String> IDLE_COMMAND = asList(
       "sh", "-c", "trap 'exit 0' SIGINT SIGTERM; while :; do sleep 1; done");
 
@@ -628,6 +629,11 @@ public abstract class SystemTestBase {
     return main;
   }
 
+  protected void stopAgent(final AgentMain main) throws Exception {
+    main.stopAsync().awaitTerminated();
+    services.remove(main);
+  }
+
   protected JobId createJob(final String name,
                             final String version,
                             final String image,
@@ -914,20 +920,28 @@ public abstract class SystemTestBase {
     });
   }
 
-  protected HostStatus awaitHostStatusWithLabels(final HeliosClient client, final String host,
+  protected HostStatus awaitHostStatusWithLabels(final HeliosClient client,
+                                                 final String host,
                                                  final HostStatus.Status status,
-                                                 final int timeout,
-                                                 final TimeUnit timeUnit) throws Exception {
-    return Polling.await(timeout, timeUnit, new Callable<HostStatus>() {
-      @Override
-      public HostStatus call() throws Exception {
-        final HostStatus hostStatus = getOrNull(client.hostStatus(host));
-        if (hostStatus == null || hostStatus.getLabels().size() == 0) {
-          return null;
-        }
-        return (hostStatus.getStatus() == status) ? hostStatus : null;
+                                                 final Map<String, String> labels)
+      throws Exception {
+
+    final HostStatus hostStatus = Polling.await(LONG_WAIT_SECONDS, SECONDS, () -> {
+      final HostStatus candidate = getOrNull(client.hostStatus(host));
+
+      if (candidate == null || candidate.getStatus() != status
+          // labels are stored in ZK after the host has come up
+          || candidate.getLabels().size() == 0) {
+
+        return null;
       }
+      return candidate;
     });
+
+    assertThat("host " + host + " has status=" + status + " with labels=" + hostStatus.getLabels(),
+        hostStatus.getLabels(), is(labels));
+
+    return hostStatus;
   }
 
   protected HostStatus awaitHostStatusWithHostInfo(final HeliosClient client, final String host,
@@ -990,7 +1004,7 @@ public abstract class SystemTestBase {
   protected DeploymentGroupStatus awaitDeploymentGroupStatus(
       final HeliosClient client,
       final String name,
-      final DeploymentGroupStatus.State state)
+      final DeploymentGroupStatus.State expected)
       throws Exception {
     return Polling.await(LONG_WAIT_SECONDS, SECONDS, new Callable<DeploymentGroupStatus>() {
       @Override
@@ -1000,10 +1014,15 @@ public abstract class SystemTestBase {
 
         if (response != null) {
           final DeploymentGroupStatus status = response.getDeploymentGroupStatus();
-          if (status.getState().equals(state)) {
+          final DeploymentGroupStatus.State actual = status.getState();
+          // The deployment group failed when we did not expect it to.
+          if (actual == FAILED && actual != expected) {
+            throw new AssertionError("Deployment group " + name + " failed unexpectedly: "
+                                     + status.getError());
+          }
+          // The deployment group reached our desired status.
+          if (actual == expected) {
             return status;
-          } else if (status.getState().equals(DeploymentGroupStatus.State.FAILED)) {
-            assertEquals(state, status.getState());
           }
         }
 

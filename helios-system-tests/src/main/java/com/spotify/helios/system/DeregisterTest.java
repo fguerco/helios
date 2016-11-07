@@ -17,7 +17,12 @@
 
 package com.spotify.helios.system;
 
-import com.google.common.collect.ImmutableMap;
+import static com.spotify.helios.common.descriptors.Goal.START;
+import static com.spotify.helios.common.descriptors.HostStatus.Status.DOWN;
+import static com.spotify.helios.common.descriptors.HostStatus.Status.UP;
+import static com.spotify.helios.common.descriptors.TaskStatus.State.RUNNING;
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.junit.Assert.assertEquals;
 
 import com.spotify.helios.TemporaryPorts;
 import com.spotify.helios.agent.AgentMain;
@@ -35,20 +40,12 @@ import com.spotify.helios.servicescommon.ZooKeeperRegistrarUtil;
 import com.spotify.helios.servicescommon.coordination.DefaultZooKeeperClient;
 import com.spotify.helios.servicescommon.coordination.Paths;
 
-import org.hamcrest.Matchers;
+import com.google.common.collect.ImmutableMap;
 import org.junit.Rule;
 import org.junit.Test;
 
 import java.util.UUID;
 import java.util.concurrent.TimeoutException;
-
-import static com.spotify.helios.common.descriptors.Goal.START;
-import static com.spotify.helios.common.descriptors.HostStatus.Status.DOWN;
-import static com.spotify.helios.common.descriptors.HostStatus.Status.UP;
-import static com.spotify.helios.common.descriptors.TaskStatus.State.RUNNING;
-import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThat;
 
 public class DeregisterTest extends SystemTestBase {
 
@@ -162,8 +159,7 @@ public class DeregisterTest extends SystemTestBase {
     // Wait for agent to come up
     awaitHostRegistered(client, host, LONG_WAIT_SECONDS, SECONDS);
     final HostStatus hostStatus1 =
-        awaitHostStatusWithLabels(client, host, UP, LONG_WAIT_SECONDS, SECONDS);
-    assertThat(hostStatus1.getLabels(), Matchers.hasEntry("num", "1"));
+        awaitHostStatusWithLabels(client, host, UP, ImmutableMap.of("num", "1"));
     // Wait for agent to be UP and report HostInfo
     awaitHostStatusWithHostInfo(client, host, UP, LONG_WAIT_SECONDS, SECONDS);
 
@@ -179,8 +175,7 @@ public class DeregisterTest extends SystemTestBase {
     // Check that the new host is registered
     awaitHostRegistered(client, host, LONG_WAIT_SECONDS, SECONDS);
     final HostStatus hostStatus2 =
-        awaitHostStatusWithLabels(client, host, UP, LONG_WAIT_SECONDS, SECONDS);
-    assertThat(hostStatus2.getLabels(), Matchers.hasEntry("num", "2"));
+        awaitHostStatusWithLabels(client, host, UP, ImmutableMap.of("num", "2"));
   }
 
   @Test(expected = TimeoutException.class)
@@ -238,9 +233,7 @@ public class DeregisterTest extends SystemTestBase {
 
     // Check that the new host is registered
     awaitHostRegistered(client, host, LONG_WAIT_SECONDS, SECONDS);
-    final HostStatus hostStatus2 =
-        awaitHostStatusWithLabels(client, host, UP, LONG_WAIT_SECONDS, SECONDS);
-    assertThat(hostStatus2.getLabels(), Matchers.hasEntry("num", "2"));
+    awaitHostStatusWithLabels(client, host, UP, ImmutableMap.of("num", "2"));
 
     // Check that the job we previously deployed is preserved
     awaitJobState(client, host, jobId, RUNNING, WAIT_TIMEOUT_SECONDS, SECONDS);

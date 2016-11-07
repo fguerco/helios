@@ -17,30 +17,6 @@
 
 package com.spotify.helios.system;
 
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Lists;
-import com.google.common.io.Resources;
-
-import com.spotify.docker.client.DockerClient;
-import com.spotify.docker.client.LogStream;
-import com.spotify.docker.client.exceptions.DockerException;
-import com.spotify.docker.client.messages.ContainerConfig;
-import com.spotify.docker.client.messages.ContainerCreation;
-import com.spotify.docker.client.messages.ContainerInfo;
-import com.spotify.docker.client.messages.HostConfig;
-import com.spotify.helios.common.descriptors.JobId;
-import com.spotify.helios.common.descriptors.TaskStatus;
-
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-
-import java.nio.file.Paths;
-import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import static com.spotify.docker.client.DockerClient.LogsParam.stderr;
 import static com.spotify.docker.client.DockerClient.LogsParam.stdout;
 import static com.spotify.helios.common.descriptors.HostStatus.Status.UP;
@@ -52,6 +28,31 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.fail;
+
+import com.spotify.docker.client.DockerClient;
+import com.spotify.docker.client.LogStream;
+import com.spotify.docker.client.exceptions.DockerException;
+import com.spotify.docker.client.exceptions.DockerRequestException;
+import com.spotify.docker.client.messages.ContainerConfig;
+import com.spotify.docker.client.messages.ContainerCreation;
+import com.spotify.docker.client.messages.ContainerInfo;
+import com.spotify.docker.client.messages.HostConfig;
+import com.spotify.helios.common.descriptors.JobId;
+import com.spotify.helios.common.descriptors.TaskStatus;
+
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Lists;
+import com.google.common.io.Resources;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+
+import java.nio.file.Paths;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class SyslogRedirectionTest extends SystemTestBase {
 
@@ -124,7 +125,7 @@ public class SyslogRedirectionTest extends SystemTestBase {
           .publishAllPorts(true)
           .build();
       final ContainerConfig config = ContainerConfig.builder()
-          .image(ALPINE) // includes busybox with netcat with udp support
+          .image(ALPINE) // includes spotify/busybox:latest with netcat with udp support
           .cmd(asList("nc", "-p", port, "-l", "-u"))
           .exposedPorts(ImmutableSet.of(expose))
           .hostConfig(hostConfig)
@@ -151,15 +152,27 @@ public class SyslogRedirectionTest extends SystemTestBase {
 
       final TaskStatus taskStatus = awaitTaskState(jobId, testHost(), EXITED);
 
-      // Verify the log for the task container
       {
-        final String log;
-        try (LogStream logs = docker.logs(taskStatus.getContainerId(), stdout(), stderr())) {
-          log = logs.readFully();
-        }
+        // Verify the log for the task container
+        LogStream logs = null;
+        try {
+          logs = docker.logs(taskStatus.getContainerId(), stdout(), stderr());
+          final String log = logs.readFully();
 
-        // should be nothing in the docker output log, either error text or our message
-        assertEquals("", log);
+          // for old docker versions should be nothing in the docker output log, either error text
+          // or our message
+          assertEquals("", log);
+        } catch (DockerRequestException e) {
+          // for new docker versions, trying to read logs should throw an error but the syslog
+          // option should be set
+          final String logType = docker.inspectContainer(taskStatus.getContainerId())
+              .hostConfig().logConfig().logType();
+          assertEquals("syslog", logType);
+        } finally {
+          if (logs != null) {
+            logs.close();
+          }
+        }
       }
 
       // Verify the log for the syslog container

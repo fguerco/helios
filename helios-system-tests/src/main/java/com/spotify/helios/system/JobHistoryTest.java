@@ -17,6 +17,12 @@
 
 package com.spotify.helios.system;
 
+import static com.spotify.helios.common.descriptors.TaskStatus.State.RUNNING;
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.not;
+import static org.junit.Assert.assertThat;
+
 import com.spotify.helios.Polling;
 import com.spotify.helios.client.HeliosClient;
 import com.spotify.helios.common.descriptors.HostStatus.Status;
@@ -33,13 +39,8 @@ import java.util.Arrays;
 import java.util.ListIterator;
 import java.util.concurrent.Callable;
 
-import static com.spotify.helios.common.descriptors.TaskStatus.State.RUNNING;
-import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.hamcrest.Matchers.allOf;
-import static org.hamcrest.Matchers.not;
-import static org.junit.Assert.assertThat;
-
 public class JobHistoryTest extends SystemTestBase {
+
   @Test
   public void testJobHistory() throws Exception {
     startDefaultMaster();
@@ -65,7 +66,7 @@ public class JobHistoryTest extends SystemTestBase {
         int requiredEventCount = -1;
         for (int i = 0; i < size; i++) {
           if (events.getEvents().get(i).getStatus().getState() != State.PULLING_IMAGE) {
-            requiredEventCount = i + 4;
+            requiredEventCount = i + 5;
             break;
           }
         }
@@ -101,6 +102,20 @@ public class JobHistoryTest extends SystemTestBase {
     assertThat(it.next(), hasState(State.STOPPING));
 
     assertThat(it.next(), hasState(State.EXITED, State.STOPPED));
+  }
+
+  @Test
+  public void testJobHistoryDisabled() throws Exception {
+    startDefaultMaster();
+    final HeliosClient client = defaultClient();
+
+    startDefaultAgent(testHost(), "--disable-job-history");
+    awaitHostStatus(testHost(), Status.UP, LONG_WAIT_SECONDS, SECONDS);
+    final JobId jobId = createJob(testJobName, testJobVersion, BUSYBOX, IDLE_COMMAND);
+    deployJob(jobId, testHost());
+    awaitJobState(client, testHost(), jobId, RUNNING, LONG_WAIT_SECONDS, SECONDS);
+    undeployJob(jobId, testHost());
+    awaitTaskGone(client, testHost(), jobId, LONG_WAIT_SECONDS, SECONDS);
   }
 
   private static Matcher<TaskStatusEvent> hasState(final State... possibleStates) {

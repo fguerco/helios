@@ -17,10 +17,8 @@
 
 package com.spotify.helios.agent;
 
-import com.google.common.base.Optional;
-import com.google.common.base.Stopwatch;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.SettableFuture;
+import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 import com.spotify.docker.client.DockerClient;
 import com.spotify.docker.client.exceptions.ContainerNotFoundException;
@@ -41,11 +39,13 @@ import com.spotify.helios.serviceregistration.ServiceRegistrar;
 import com.spotify.helios.serviceregistration.ServiceRegistrationHandle;
 import com.spotify.helios.servicescommon.InterruptingExecutionThreadService;
 
+import com.google.common.base.Optional;
+import com.google.common.base.Stopwatch;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import static com.google.common.base.Preconditions.checkNotNull;
-import static java.util.concurrent.TimeUnit.SECONDS;
 
 /**
  * A runner service that starts a container once.
@@ -53,7 +53,6 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 class TaskRunner extends InterruptingExecutionThreadService {
 
   private static final Logger log = LoggerFactory.getLogger(TaskRunner.class);
-  private static final int SECONDS_TO_WAIT_BEFORE_KILL = 120;
 
   private final long delayMillis;
   private final SettableFuture<Integer> result = SettableFuture.create();
@@ -66,6 +65,7 @@ class TaskRunner extends InterruptingExecutionThreadService {
   private Optional<ServiceRegistrationHandle> serviceRegistrationHandle;
   private Optional<String> containerId;
   private final String containerName;
+  private int secondsToWaitBeforeKill;
 
   private TaskRunner(final Builder builder) {
     super("TaskRunner(" + builder.taskConfig.name() + ")");
@@ -76,6 +76,7 @@ class TaskRunner extends InterruptingExecutionThreadService {
     this.listener = checkNotNull(builder.listener, "listener");
     this.existingContainerId = builder.existingContainerId;
     this.registrar = checkNotNull(builder.registrar, "registrar");
+    this.secondsToWaitBeforeKill = checkNotNull(builder.secondsToWaitBeforeKill, "waitBeforeKill");
     this.healthChecker = Optional.fromNullable(builder.healthChecker);
     this.serviceRegistrationHandle = Optional.absent();
     this.containerId = Optional.absent();
@@ -114,7 +115,7 @@ class TaskRunner extends InterruptingExecutionThreadService {
     stopAsync().awaitTerminated();
 
     try {
-      docker.stopContainer(container, SECONDS_TO_WAIT_BEFORE_KILL);
+      docker.stopContainer(container, secondsToWaitBeforeKill);
     } catch (DockerException e) {
       if ((e instanceof ContainerNotFoundException) && !containerId.isPresent()) {
         // we tried to stop the container by name but no container of the given name existed.
@@ -225,13 +226,29 @@ class TaskRunner extends InterruptingExecutionThreadService {
       throws DockerException, InterruptedException {
 
     // Ensure we have the image
-    final String image = config.containerImage();
-    pullImage(image);
+    boolean serializePulls = false;
+    final Optional<String> dockerVersion = tryGetDockerVersion();
+    if (dockerVersion.isPresent()) {
+      final String version = dockerVersion.get();
+      if (version.startsWith("1.6.") || version.startsWith("1.7.") || version.startsWith("1.8.")) {
+        // Docker versions 1.6 through 1.8 have issues with concurrent pulls
+        serializePulls = true;
+      }
+    }
 
-    return startContainer(image);
+    final String image = config.containerImage();
+    if (serializePulls) {
+      synchronized (docker) {
+        pullImage(image);
+      }
+    } else {
+      pullImage(image);
+    }
+
+    return startContainer(image, dockerVersion);
   }
 
-  private String startContainer(final String image)
+  private String startContainer(final String image, final Optional<String> dockerVersion)
       throws InterruptedException, DockerException {
 
     // Get container image info
@@ -241,8 +258,8 @@ class TaskRunner extends InterruptingExecutionThreadService {
     }
 
     // Create container
-    final HostConfig hostConfig = config.hostConfig();
-    final ContainerConfig containerConfig = config.containerConfig(imageInfo)
+    final HostConfig hostConfig = config.hostConfig(dockerVersion);
+    final ContainerConfig containerConfig = config.containerConfig(imageInfo, dockerVersion)
         .toBuilder()
         .hostConfig(hostConfig)
         .build();
@@ -283,8 +300,18 @@ class TaskRunner extends InterruptingExecutionThreadService {
     return info.state();
   }
 
+  private Optional<String> tryGetDockerVersion() {
+    try {
+      return Optional.fromNullable(docker.version().version());
+    } catch (Exception e) {
+      log.error("couldn't fetch Docker version: {}", e);
+      return Optional.absent();
+    }
+  }
+
   private void pullImage(final String image) throws DockerException, InterruptedException {
     listener.pulling();
+
     DockerTimeoutException wasTimeout = null;
     final Stopwatch pullTime = Stopwatch.createStarted();
 
@@ -357,6 +384,7 @@ class TaskRunner extends InterruptingExecutionThreadService {
     private String existingContainerId;
     private Listener listener;
     private HealthChecker healthChecker;
+    private int secondsToWaitBeforeKill;
     public ServiceRegistrar registrar = new NopServiceRegistrar();
 
     public Builder delayMillis(final long delayMillis) {
@@ -391,6 +419,11 @@ class TaskRunner extends InterruptingExecutionThreadService {
 
     public Builder registrar(final ServiceRegistrar registrar) {
       this.registrar = registrar;
+      return this;
+    }
+
+    public Builder secondsToWaitBeforeKill(int seconds) {
+      this.secondsToWaitBeforeKill = seconds;
       return this;
     }
 
