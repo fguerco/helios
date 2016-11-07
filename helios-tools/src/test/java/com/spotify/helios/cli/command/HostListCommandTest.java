@@ -17,18 +17,10 @@
 
 package com.spotify.helios.cli.command;
 
-import static com.google.common.util.concurrent.Futures.immediateFuture;
-import static com.spotify.helios.common.descriptors.HostStatus.Status.DOWN;
-import static com.spotify.helios.common.descriptors.HostStatus.Status.UP;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.equalTo;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThat;
-import static org.mockito.Matchers.anyMapOf;
-import static org.mockito.Matchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.util.concurrent.Futures;
 import com.spotify.helios.cli.TestUtils;
 import com.spotify.helios.client.HeliosClient;
 import com.spotify.helios.common.descriptors.AgentInfo;
@@ -40,17 +32,11 @@ import com.spotify.helios.common.descriptors.HostStatus;
 import com.spotify.helios.common.descriptors.Job;
 import com.spotify.helios.common.descriptors.JobId;
 import com.spotify.helios.common.descriptors.TaskStatus;
-
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.util.concurrent.Futures;
 import net.sourceforge.argparse4j.ArgumentParsers;
 import net.sourceforge.argparse4j.inf.ArgumentParser;
 import net.sourceforge.argparse4j.inf.ArgumentParserException;
 import net.sourceforge.argparse4j.inf.Namespace;
 import net.sourceforge.argparse4j.inf.Subparser;
-
 import org.junit.Before;
 import org.junit.Test;
 
@@ -64,14 +50,15 @@ import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
+import static com.google.common.util.concurrent.Futures.immediateFuture;
 import static com.spotify.helios.common.descriptors.HostStatus.Status.DOWN;
 import static com.spotify.helios.common.descriptors.HostStatus.Status.UP;
 import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.equalToIgnoringWhiteSpace;
+import static org.hamcrest.Matchers.equalTo;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
-import static org.mockito.Matchers.anyListOf;
 import static org.mockito.Matchers.anyMapOf;
+import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -124,10 +111,6 @@ public class HostListCommandTest {
   @Before
   public void setUp() throws ParseException {
     Locale.setDefault(Locale.ROOT);
-    // use a real, dummy Subparser impl to avoid having to mock out every single call
-    final ArgumentParser parser = ArgumentParsers.newArgumentParser("test");
-    final Subparser subparser = parser.addSubparsers().addParser("hosts");
-    command = new HostListCommand(subparser);
 
     when(options.getString("pattern")).thenReturn("");
     when(client.listHosts()).thenReturn(Futures.immediateFuture(HOSTS));

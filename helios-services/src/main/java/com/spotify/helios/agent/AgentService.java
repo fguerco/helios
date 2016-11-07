@@ -17,19 +17,15 @@
 
 package com.spotify.helios.agent;
 
-import static com.google.common.base.Charsets.UTF_8;
-import static com.google.common.base.Strings.isNullOrEmpty;
-import static com.spotify.helios.agent.Agent.EMPTY_EXECUTIONS;
-import static com.spotify.helios.servicescommon.ServiceRegistrars.createServiceRegistrar;
-import static com.spotify.helios.servicescommon.ZooKeeperAclProviders.digest;
-import static com.spotify.helios.servicescommon.ZooKeeperAclProviders.heliosAclProvider;
-import static java.lang.management.ManagementFactory.getOperatingSystemMXBean;
-import static java.lang.management.ManagementFactory.getRuntimeMXBean;
-import static java.nio.file.StandardOpenOption.CREATE;
-import static java.nio.file.StandardOpenOption.WRITE;
-
 import com.codahale.metrics.MetricRegistry;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.google.common.base.Strings;
+import com.google.common.base.Suppliers;
+import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Lists;
+import com.google.common.io.Resources;
+import com.google.common.util.concurrent.AbstractIdleService;
 import com.spotify.docker.client.DefaultDockerClient;
 import com.spotify.docker.client.DockerCertificates;
 import com.spotify.docker.client.DockerClient;
@@ -63,16 +59,6 @@ import com.spotify.helios.servicescommon.statistics.FastForwardReporter;
 import com.spotify.helios.servicescommon.statistics.Metrics;
 import com.spotify.helios.servicescommon.statistics.MetricsImpl;
 import com.spotify.helios.servicescommon.statistics.NoopMetrics;
-
-import com.codahale.metrics.MetricRegistry;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.google.common.base.Strings;
-import com.google.common.base.Suppliers;
-import com.google.common.base.Throwables;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Lists;
-import com.google.common.io.Resources;
-import com.google.common.util.concurrent.AbstractIdleService;
 import com.sun.management.OperatingSystemMXBean;
 import io.dropwizard.configuration.ConfigurationException;
 import io.dropwizard.lifecycle.Managed;
@@ -97,6 +83,17 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+
+import static com.google.common.base.Charsets.UTF_8;
+import static com.google.common.base.Strings.isNullOrEmpty;
+import static com.spotify.helios.agent.Agent.EMPTY_EXECUTIONS;
+import static com.spotify.helios.servicescommon.ServiceRegistrars.createServiceRegistrar;
+import static com.spotify.helios.servicescommon.ZooKeeperAclProviders.digest;
+import static com.spotify.helios.servicescommon.ZooKeeperAclProviders.heliosAclProvider;
+import static java.lang.management.ManagementFactory.getOperatingSystemMXBean;
+import static java.lang.management.ManagementFactory.getRuntimeMXBean;
+import static java.nio.file.StandardOpenOption.CREATE;
+import static java.nio.file.StandardOpenOption.WRITE;
 
 /**
  * The Helios agent.
@@ -358,8 +355,7 @@ public class AgentService extends AbstractIdleService implements Managed {
               .uri(config.getDockerHost().uri());
       try {
          dockerClientBuilder.authConfig(AuthConfig.fromDockerConfig().build());
-      }
-      catch (Exception ex) {
+      } catch (Exception ex) {
         // nothing
       }
       dockerClient = new PollingDockerClient(dockerClientBuilder);
