@@ -17,11 +17,10 @@
 
 package com.spotify.helios.cli.command;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.ListenableFuture;
-
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.spotify.helios.client.HeliosClient;
 import com.spotify.helios.common.Json;
 import com.spotify.helios.common.descriptors.DeploymentGroup;
@@ -31,10 +30,8 @@ import com.spotify.helios.common.descriptors.RolloutOptions;
 import com.spotify.helios.common.descriptors.TaskStatus;
 import com.spotify.helios.common.protocol.DeploymentGroupStatusResponse;
 import com.spotify.helios.common.protocol.RollingUpdateResponse;
-
 import net.sourceforge.argparse4j.ArgumentParsers;
 import net.sourceforge.argparse4j.inf.Namespace;
-
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.invocation.InvocationOnMock;
@@ -46,6 +43,7 @@ import java.io.PrintStream;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static com.google.common.util.concurrent.Futures.immediateFuture;
@@ -78,6 +76,7 @@ public class RollingUpdateCommandTest {
 
   @Before
   public void before() {
+    Locale.setDefault(Locale.ROOT);
     // Default CLI argument stubs
     when(options.getString("deployment-group-name")).thenReturn(GROUP_NAME);
     when(options.getInt("parallelism")).thenReturn(PARALLELISM);

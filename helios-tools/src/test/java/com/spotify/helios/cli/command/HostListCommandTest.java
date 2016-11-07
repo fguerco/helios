@@ -45,6 +45,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.text.ParseException;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -108,6 +109,7 @@ public class HostListCommandTest {
 
   @Before
   public void setUp() throws ParseException {
+    Locale.setDefault(Locale.ROOT);
     // use a real, dummy Subparser impl to avoid having to mock out every single call
     final ArgumentParser parser = ArgumentParsers.newArgumentParser("test");
     final Subparser subparser = parser.addSubparsers().addParser("hosts");

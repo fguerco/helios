@@ -37,6 +37,7 @@ import org.junit.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.util.Date;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
 
@@ -74,6 +75,7 @@ public class JobInspectCommandTest {
 
   @Before
   public void setUp() {
+    Locale.setDefault(Locale.ROOT);
     // use a real, dummy Subparser impl to avoid having to mock out every single call
     final ArgumentParser parser = ArgumentParsers.newArgumentParser("test");
     final Subparser subparser = parser.addSubparsers().addParser("inspect");
