@@ -288,6 +288,8 @@ public class AgentService extends AbstractIdleService implements Managed {
       decorators.add(new AddExtraHostContainerDecorator(config.getExtraHosts()));
     }
 
+    decorators.add(new LogConfigContainerDecorator());
+
     final SupervisorFactory supervisorFactory = new SupervisorFactory(
         model, dockerClient,
         config.getEnvVars(), serviceRegistrar,
