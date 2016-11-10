@@ -133,7 +133,7 @@ public class Job extends Descriptor implements Comparable<Job> {
   public static final Map<String, String> EMPTY_METADATA = emptyMap();
   public static final Set<String> EMPTY_CAPS = emptySet();
   public static final Integer EMPTY_SECONDS_TO_WAIT = null;
-  public static final ContainerLogConfig EMPTY_LOG_CONFIG = null;
+  public static final LoggingConfiguration EMPTY_LOGGING = null;
 
   private final JobId id;
   private final String image;
@@ -157,7 +157,7 @@ public class Job extends Descriptor implements Comparable<Job> {
   private final Set<String> addCapabilities;
   private final Set<String> dropCapabilities;
   private final Integer secondsToWaitBeforeKill;
-  private final ContainerLogConfig logConfig;
+  private final LoggingConfiguration logging;
 
   /**
    * Create a Job.
@@ -194,7 +194,7 @@ public class Job extends Descriptor implements Comparable<Job> {
    * @see <a href="https://docs.docker.com/reference/run/#network-settings">Docker run reference</a>
    * @param secondsToWaitBeforeKill The time to ask Docker to wait after sending a SIGTERM to the
    *    container's main process before sending it a SIGKILL. Optional.
-   * @param logConfig Log configuration for containers. Optional
+   * @param logging Log configuration for containers. Optional
    */
   public Job(
       @JsonProperty("id") final JobId id,
@@ -219,7 +219,7 @@ public class Job extends Descriptor implements Comparable<Job> {
       @JsonProperty("addCapabilities") @Nullable final Set<String> addCapabilities,
       @JsonProperty("dropCapabilities") @Nullable final Set<String> dropCapabilities,
       @JsonProperty("secondsToWaitBeforeKill") @Nullable final Integer secondsToWaitBeforeKill,
-      @JsonProperty("logConfig") @Nullable ContainerLogConfig logConfig) {
+      @JsonProperty("logging") @Nullable LoggingConfiguration logging) {
     this.id = id;
     this.image = image;
 
@@ -245,7 +245,7 @@ public class Job extends Descriptor implements Comparable<Job> {
     this.addCapabilities = firstNonNull(addCapabilities, EMPTY_CAPS);
     this.dropCapabilities = firstNonNull(dropCapabilities, EMPTY_CAPS);
     this.secondsToWaitBeforeKill = secondsToWaitBeforeKill;
-    this.logConfig = logConfig;
+    this.logging = logging;
   }
 
   private Job(final JobId id, final Builder.Parameters p) {
@@ -273,7 +273,7 @@ public class Job extends Descriptor implements Comparable<Job> {
     this.addCapabilities = ImmutableSet.copyOf(p.addCapabilities);
     this.dropCapabilities = ImmutableSet.copyOf(p.dropCapabilities);
     this.secondsToWaitBeforeKill = p.secondsToWaitBeforeKill;
-    this.logConfig = p.logConfig;
+    this.logging = p.logging;
   }
 
   public JobId getId() {
@@ -364,8 +364,8 @@ public class Job extends Descriptor implements Comparable<Job> {
     return secondsToWaitBeforeKill;
   }
 
-  public ContainerLogConfig getLogConfig() {
-    return logConfig;
+  public LoggingConfiguration getLogging() {
+    return logging;
   }
 
   public static Builder newBuilder() {
@@ -446,7 +446,7 @@ public class Job extends Descriptor implements Comparable<Job> {
            ", addCapabilities=" + addCapabilities +
            ", dropCapabilities=" + dropCapabilities +
            ", secondsToWaitBeforeKill=" + secondsToWaitBeforeKill +
-           ", logConfig=" + logConfig +
+           ", logging=" + logging +
            '}';
   }
 
@@ -479,7 +479,7 @@ public class Job extends Descriptor implements Comparable<Job> {
         .setAddCapabilities(addCapabilities)
         .setDropCapabilities(dropCapabilities)
         .setSecondsToWaitBeforeKill(secondsToWaitBeforeKill)
-        .setLogConfig(logConfig);
+        .setLogging(logging);
   }
 
   public static class Builder implements Cloneable {
@@ -521,7 +521,7 @@ public class Job extends Descriptor implements Comparable<Job> {
       public Set<String> addCapabilities;
       public Set<String> dropCapabilities;
       public Integer secondsToWaitBeforeKill;
-      public ContainerLogConfig logConfig;
+      public LoggingConfiguration logging;
 
       private Parameters() {
         this.created = EMPTY_CREATED;
@@ -540,7 +540,7 @@ public class Job extends Descriptor implements Comparable<Job> {
         this.metadata = Maps.newHashMap();
         this.addCapabilities = EMPTY_CAPS;
         this.dropCapabilities = EMPTY_CAPS;
-        this.logConfig = EMPTY_LOG_CONFIG;
+        this.logging = EMPTY_LOGGING;
       }
 
       private Parameters(final Parameters p) {
@@ -567,7 +567,7 @@ public class Job extends Descriptor implements Comparable<Job> {
         this.addCapabilities = p.addCapabilities;
         this.dropCapabilities = p.dropCapabilities;
         this.secondsToWaitBeforeKill = p.secondsToWaitBeforeKill;
-        this.logConfig = p.logConfig;
+        this.logging = p.logging;
       }
 
       private Parameters withoutMetaParameters() {
@@ -729,8 +729,8 @@ public class Job extends Descriptor implements Comparable<Job> {
       return this;
     }
 
-    public Builder setLogConfig(final ContainerLogConfig logConfig) {
-      p.logConfig = logConfig;
+    public Builder setLogging(final LoggingConfiguration logging) {
+      p.logging = logging;
       return this;
     }
 
@@ -818,8 +818,8 @@ public class Job extends Descriptor implements Comparable<Job> {
       return p.secondsToWaitBeforeKill;
     }
 
-    public ContainerLogConfig getLogConfig() {
-      return p.logConfig;
+    public LoggingConfiguration getLogging() {
+      return p.logging;
     }
 
     @SuppressWarnings({"CloneDoesntDeclareCloneNotSupportedException", "CloneDoesntCallSuperClone"})

@@ -23,7 +23,7 @@ import com.spotify.docker.client.messages.ContainerConfig;
 import com.spotify.docker.client.messages.HostConfig;
 import com.spotify.docker.client.messages.ImageInfo;
 import com.spotify.docker.client.messages.LogConfig;
-import com.spotify.helios.common.descriptors.ContainerLogConfig;
+import com.spotify.helios.common.descriptors.LoggingConfiguration;
 import com.spotify.helios.common.descriptors.Job;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,12 +38,12 @@ public class LogConfigContainerDecorator implements ContainerDecorator {
   @Override
   public void decorateHostConfig(Job job, Optional<String> dockerVersion,
                                  HostConfig.Builder hostConfig) {
-    final ContainerLogConfig logConfig = job.getLogConfig();
+    final LoggingConfiguration logging = job.getLogging();
 
-    if (logConfig != Job.EMPTY_LOG_CONFIG) {
+    if (logging != Job.EMPTY_LOGGING) {
       final ImmutableMap.Builder<String, String> logOpts = ImmutableMap.builder();
-      logOpts.putAll(logConfig.getOptions());
-      hostConfig.logConfig(LogConfig.create(job.getLogConfig().getDriver(), logOpts.build()));
+      logOpts.putAll(logging.getOptions());
+      hostConfig.logConfig(LogConfig.create(job.getLogging().getDriver(), logOpts.build()));
     }
   }
 

@@ -23,7 +23,7 @@ import java.util.Map;
 /**
  * Configuration for log driver and options
  */
-public class ContainerLogConfig {
+public class LoggingConfiguration {
 
   private String driver;
   private Map<String, String> options;
@@ -46,7 +46,7 @@ public class ContainerLogConfig {
 
   @Override
   public String toString() {
-    return "ContainerLogConfig{" +
+    return "LoggingConfiguration{" +
         "driver='" + driver + '\'' +
         ", options=" + options +
         '}';
