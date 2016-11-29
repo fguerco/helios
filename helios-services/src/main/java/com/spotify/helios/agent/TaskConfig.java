@@ -268,7 +268,10 @@ public class TaskConfig {
         binding.hostPort(externalPort.toString());
       }
       final String entry = containerPort(mapping.getInternalPort(), mapping.getProtocol());
-      bindings.put(entry, Collections.singletonList(binding));
+      if (bindings.get(entry) == null) {
+        bindings.put(entry, Lists.newArrayList());
+      }
+      bindings.get(entry).add(binding);
     }
     return bindings;
   }
