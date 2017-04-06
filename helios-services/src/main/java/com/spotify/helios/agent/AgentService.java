@@ -284,9 +284,7 @@ public class AgentService extends AbstractIdleService implements Managed {
       decorators.add(new BindVolumeContainerDecorator(config.getBinds()));
     }
 
-    if (!config.getExtraHosts().isEmpty()) {
-      decorators.add(new AddExtraHostContainerDecorator(config.getExtraHosts()));
-    }
+    decorators.add(new AddExtraHostContainerDecorator(config.getExtraHosts()));
 
     decorators.add(new LogConfigContainerDecorator());
 

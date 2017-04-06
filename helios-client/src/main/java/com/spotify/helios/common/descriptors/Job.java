@@ -17,17 +17,6 @@
 
 package com.spotify.helios.common.descriptors;
 
-import static com.google.common.base.Charsets.UTF_8;
-import static com.google.common.base.MoreObjects.firstNonNull;
-import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.base.Throwables.propagate;
-import static com.spotify.helios.common.Hash.sha1digest;
-import static java.util.Collections.emptyList;
-import static java.util.Collections.emptyMap;
-import static java.util.Collections.emptySet;
-
-import com.spotify.helios.common.Json;
-
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Optional;
@@ -37,7 +26,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import com.google.common.io.BaseEncoding;
-
+import com.spotify.helios.common.Json;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -48,6 +37,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+
+import static com.google.common.base.Charsets.UTF_8;
+import static com.google.common.base.MoreObjects.firstNonNull;
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Throwables.propagate;
+import static com.spotify.helios.common.Hash.sha1digest;
+import static java.util.Collections.emptyList;
+import static java.util.Collections.emptyMap;
+import static java.util.Collections.emptySet;
 
 /**
  * Represents a Helios job.
@@ -134,6 +132,7 @@ public class Job extends Descriptor implements Comparable<Job> {
   public static final Set<String> EMPTY_CAPS = emptySet();
   public static final Integer EMPTY_SECONDS_TO_WAIT = null;
   public static final LoggingConfiguration EMPTY_LOGGING = null;
+  public static final Set<String> EMPTY_EXTRA_HOSTS = emptySet();
 
   private final JobId id;
   private final String image;
@@ -158,6 +157,7 @@ public class Job extends Descriptor implements Comparable<Job> {
   private final Set<String> dropCapabilities;
   private final Integer secondsToWaitBeforeKill;
   private final LoggingConfiguration logging;
+  private final Set<String> extraHosts;
 
   /**
    * Create a Job.
@@ -195,6 +195,7 @@ public class Job extends Descriptor implements Comparable<Job> {
    * @param secondsToWaitBeforeKill The time to ask Docker to wait after sending a SIGTERM to the
    *    container's main process before sending it a SIGKILL. Optional.
    * @param logging Log configuration for containers. Optional
+   * @param extraHosts Extra hosts. Optional
    */
   public Job(
       @JsonProperty("id") final JobId id,
@@ -219,7 +220,8 @@ public class Job extends Descriptor implements Comparable<Job> {
       @JsonProperty("addCapabilities") @Nullable final Set<String> addCapabilities,
       @JsonProperty("dropCapabilities") @Nullable final Set<String> dropCapabilities,
       @JsonProperty("secondsToWaitBeforeKill") @Nullable final Integer secondsToWaitBeforeKill,
-      @JsonProperty("logging") @Nullable LoggingConfiguration logging) {
+      @JsonProperty("logging") @Nullable LoggingConfiguration logging,
+      @JsonProperty("extraHosts") @Nullable final Set<String> extraHosts) {
     this.id = id;
     this.image = image;
 
@@ -246,6 +248,7 @@ public class Job extends Descriptor implements Comparable<Job> {
     this.dropCapabilities = firstNonNull(dropCapabilities, EMPTY_CAPS);
     this.secondsToWaitBeforeKill = secondsToWaitBeforeKill;
     this.logging = logging;
+    this.extraHosts = extraHosts;
   }
 
   private Job(final JobId id, final Builder.Parameters p) {
@@ -274,6 +277,7 @@ public class Job extends Descriptor implements Comparable<Job> {
     this.dropCapabilities = ImmutableSet.copyOf(p.dropCapabilities);
     this.secondsToWaitBeforeKill = p.secondsToWaitBeforeKill;
     this.logging = p.logging;
+    this.extraHosts = p.extraHosts;
   }
 
   public JobId getId() {
@@ -368,6 +372,10 @@ public class Job extends Descriptor implements Comparable<Job> {
     return logging;
   }
 
+  public Set<String> getExtraHosts() {
+    return extraHosts;
+  }
+
   public static Builder newBuilder() {
     return new Builder();
   }
@@ -409,7 +417,10 @@ public class Job extends Descriptor implements Comparable<Job> {
            Objects.equals(this.metadata, that.metadata) &&
            Objects.equals(this.addCapabilities, that.addCapabilities) &&
            Objects.equals(this.dropCapabilities, that.dropCapabilities) &&
-           Objects.equals(this.secondsToWaitBeforeKill, that.secondsToWaitBeforeKill);
+           Objects.equals(this.secondsToWaitBeforeKill, that.secondsToWaitBeforeKill) &&
+           Objects.equals(this.logging, that.logging) &&
+           Objects.equals(this.extraHosts, that.extraHosts);
+
   }
 
   @Override
@@ -418,7 +429,7 @@ public class Job extends Descriptor implements Comparable<Job> {
         id, image, hostname, expires, created, command, env, resources,
         ports, registration, registrationDomain, gracePeriod, volumes, creatingUser,
         token, healthCheck, securityOpt, networkMode, metadata, addCapabilities,
-        dropCapabilities, secondsToWaitBeforeKill);
+        dropCapabilities, secondsToWaitBeforeKill, logging, extraHosts);
   }
 
   @Override
@@ -447,6 +458,7 @@ public class Job extends Descriptor implements Comparable<Job> {
            ", dropCapabilities=" + dropCapabilities +
            ", secondsToWaitBeforeKill=" + secondsToWaitBeforeKill +
            ", logging=" + logging +
+           ", extraHosts=" + extraHosts +
            '}';
   }
 
@@ -479,7 +491,8 @@ public class Job extends Descriptor implements Comparable<Job> {
         .setAddCapabilities(addCapabilities)
         .setDropCapabilities(dropCapabilities)
         .setSecondsToWaitBeforeKill(secondsToWaitBeforeKill)
-        .setLogging(logging);
+        .setLogging(logging)
+        .setExtraHosts(extraHosts);
   }
 
   public static class Builder implements Cloneable {
@@ -522,6 +535,7 @@ public class Job extends Descriptor implements Comparable<Job> {
       public Set<String> dropCapabilities;
       public Integer secondsToWaitBeforeKill;
       public LoggingConfiguration logging;
+      public Set<String> extraHosts;
 
       private Parameters() {
         this.created = EMPTY_CREATED;
@@ -541,6 +555,7 @@ public class Job extends Descriptor implements Comparable<Job> {
         this.addCapabilities = EMPTY_CAPS;
         this.dropCapabilities = EMPTY_CAPS;
         this.logging = EMPTY_LOGGING;
+        this.extraHosts = EMPTY_EXTRA_HOSTS;
       }
 
       private Parameters(final Parameters p) {
@@ -568,6 +583,7 @@ public class Job extends Descriptor implements Comparable<Job> {
         this.dropCapabilities = p.dropCapabilities;
         this.secondsToWaitBeforeKill = p.secondsToWaitBeforeKill;
         this.logging = p.logging;
+        this.extraHosts = p.extraHosts;
       }
 
       private Parameters withoutMetaParameters() {
@@ -734,6 +750,11 @@ public class Job extends Descriptor implements Comparable<Job> {
       return this;
     }
 
+    public Builder setExtraHosts(final Set<String> extraHosts) {
+      p.extraHosts = extraHosts;
+      return this;
+    }
+
     public String getName() {
       return p.name;
     }
@@ -820,6 +841,10 @@ public class Job extends Descriptor implements Comparable<Job> {
 
     public LoggingConfiguration getLogging() {
       return p.logging;
+    }
+
+    public Set<String> getExtraHosts() {
+      return p.extraHosts;
     }
 
     @SuppressWarnings({"CloneDoesntDeclareCloneNotSupportedException", "CloneDoesntCallSuperClone"})

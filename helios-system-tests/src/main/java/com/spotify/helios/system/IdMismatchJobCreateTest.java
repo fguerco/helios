@@ -29,6 +29,7 @@ import static com.spotify.helios.common.descriptors.Job.EMPTY_CREATED;
 import static com.spotify.helios.common.descriptors.Job.EMPTY_CREATING_USER;
 import static com.spotify.helios.common.descriptors.Job.EMPTY_ENV;
 import static com.spotify.helios.common.descriptors.Job.EMPTY_EXPIRES;
+import static com.spotify.helios.common.descriptors.Job.EMPTY_EXTRA_HOSTS;
 import static com.spotify.helios.common.descriptors.Job.EMPTY_GRACE_PERIOD;
 import static com.spotify.helios.common.descriptors.Job.EMPTY_HEALTH_CHECK;
 import static com.spotify.helios.common.descriptors.Job.EMPTY_HOSTNAME;
@@ -57,7 +58,8 @@ public class IdMismatchJobCreateTest extends SystemTestBase {
                 EMPTY_GRACE_PERIOD, EMPTY_VOLUMES, EMPTY_EXPIRES,
                 EMPTY_REGISTRATION_DOMAIN, EMPTY_CREATING_USER, EMPTY_TOKEN,
                 EMPTY_HEALTH_CHECK, EMPTY_SECURITY_OPT, DEFAULT_NETWORK_MODE,
-                EMPTY_METADATA, EMPTY_CAPS, EMPTY_CAPS, EMPTY_SECONDS_TO_WAIT, EMPTY_LOGGING)
+                EMPTY_METADATA, EMPTY_CAPS, EMPTY_CAPS, EMPTY_SECONDS_TO_WAIT, EMPTY_LOGGING,
+                EMPTY_EXTRA_HOSTS)
     ).get();
 
     // TODO (dano): Maybe this should be ID_MISMATCH but then JobValidator must become able to

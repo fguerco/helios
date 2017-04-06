@@ -43,6 +43,7 @@ import static com.spotify.helios.common.descriptors.Job.EMPTY_CREATED;
 import static com.spotify.helios.common.descriptors.Job.EMPTY_CREATING_USER;
 import static com.spotify.helios.common.descriptors.Job.EMPTY_ENV;
 import static com.spotify.helios.common.descriptors.Job.EMPTY_EXPIRES;
+import static com.spotify.helios.common.descriptors.Job.EMPTY_EXTRA_HOSTS;
 import static com.spotify.helios.common.descriptors.Job.EMPTY_GRACE_PERIOD;
 import static com.spotify.helios.common.descriptors.Job.EMPTY_HEALTH_CHECK;
 import static com.spotify.helios.common.descriptors.Job.EMPTY_HOSTNAME;
@@ -196,7 +197,7 @@ public class JobValidatorTest {
                             EMPTY_REGISTRATION_DOMAIN, EMPTY_CREATING_USER, EMPTY_TOKEN,
                             EMPTY_HEALTH_CHECK, EMPTY_SECURITY_OPT, DEFAULT_NETWORK_MODE,
                             EMPTY_METADATA, EMPTY_CAPS, EMPTY_CAPS, EMPTY_SECONDS_TO_WAIT,
-                            EMPTY_LOGGING);
+                            EMPTY_LOGGING, EMPTY_EXTRA_HOSTS);
     final JobId recomputedId = job.toBuilder().build().getId();
     assertEquals(ImmutableSet.of("Id hash mismatch: " + job.getId().getHash()
         + " != " + recomputedId.getHash()), validator.validate(job));
