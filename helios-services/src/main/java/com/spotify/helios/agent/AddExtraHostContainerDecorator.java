@@ -26,6 +26,7 @@ import com.spotify.docker.client.messages.HostConfig;
 import com.spotify.docker.client.messages.ImageInfo;
 import com.spotify.helios.common.descriptors.Job;
 
+import java.util.Collections;
 import java.util.List;
 
 /** ContainerDecorator that adds to {@link HostConfig#extraHosts}. */
@@ -42,7 +43,8 @@ public class AddExtraHostContainerDecorator implements ContainerDecorator {
                                  final HostConfig.Builder hostConfig) {
     final List<String> hosts = Lists.newArrayList();
     hosts.addAll(this.extraHosts);
-    hosts.addAll(job.getExtraHosts());
+    //TODO write better backwards copatiblity
+    hosts.addAll(Optional.fromNullable(job.getExtraHosts()).or(Collections.emptySet()));
     hostConfig.extraHosts(hosts);
   }
 

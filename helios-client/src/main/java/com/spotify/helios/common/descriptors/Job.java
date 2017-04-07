@@ -248,7 +248,7 @@ public class Job extends Descriptor implements Comparable<Job> {
     this.dropCapabilities = firstNonNull(dropCapabilities, EMPTY_CAPS);
     this.secondsToWaitBeforeKill = secondsToWaitBeforeKill;
     this.logging = logging;
-    this.extraHosts = extraHosts;
+    this.extraHosts = Optional.fromNullable(extraHosts).or(EMPTY_EXTRA_HOSTS);
   }
 
   private Job(final JobId id, final Builder.Parameters p) {
